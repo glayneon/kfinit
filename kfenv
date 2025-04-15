@@ -7,9 +7,18 @@ KF_USAGE="""
         - Oauth2-proxy
         - Dex
         - Knative
+        - Kubeflow's Namespace, NetworkPolicy, RBAC, and Istio resources
+        - Kubeflow's Pipelines
         - KServe
         - Katib
-        - Pipelines
+        - Central Dashboard
+        - Notebook
+        - PVC Viewer
+        - Profiles and KFAM
+        - Volume Web App
+        - Tensorboard
+        - Traning Operator
+        - User Namespace
 
 
     ENV_VAR:
@@ -27,6 +36,7 @@ FUNCTIONS=https://raw.githubusercontent.com/glayneon/kfinit/main/functions
 KF_VER_URL=https://raw.githubusercontent.com/glayneon/kfinit/main/kf_version
 KF_GIT_URL=https://github.com/kubeflow/manifests
 OS_GUM_VER=0.15.2
+KFMODE=all
 PROJECT_NAME=Kubeflow
 DELAY=2
 TIMEOUT1=180s

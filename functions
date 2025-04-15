@@ -23,17 +23,41 @@ usage() {
     echo "${KF_USAGE}"
 }
 
+# check user input
+keepgoing() {
+    while true; do
+        read -p "${1} ... keep going? [Y/n] " input
+        case "$input" in
+            [Nn]) 
+                info "::: Finish running KFinit..."
+                exit 0
+                ;;
+            [Yy]) 
+                return 0
+                ;;
+            *) 
+                echo "Invalid input. Please enter Y/y or N/n."
+                ;;
+        esac
+    done
+}
+
 # check KF_VERSION is correct
 check_kf_version() {
     if [ -z ${KF_VERSION} ]; then
         error "::: Please set the version of Kubeflow in '${KF_VERSION}' Variable..."
         exit 1
     fi
-    
 }
 
 # 0. clone git and working directory
 clone_git() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Clone Git and Working Directory ..."
     KF_VERSION=${1}
     check_kf_version
     WORK_DIR=manifests
@@ -49,6 +73,11 @@ clone_git() {
 
 # 1. install cert-manager
 install_cert_manager() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
     info "::: Install Cert-Manager ..."
     if [ "${DRYRUN}" != 1 ]; then
         kustomize build common/cert-manager/base | kubectl apply -f -
@@ -64,6 +93,11 @@ install_cert_manager() {
 
 # 2. install istio
 install_istio() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
     info "::: Install Istio ..."
     if [ "${DRYRUN}" != 1 ]; then
         info "Installing Istio configured with external authorization..."
@@ -79,6 +113,11 @@ install_istio() {
 
 # 3. install oauth2-proxy
 install_oauth2_proxy() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
     info "::: Install Oauth2-Proxy ..."
     if [ "${DRYRUN}" != 1 ]; then
         kustomize build common/oauth2-proxy/overlays/m2m-dex-only/ | kubectl apply -f -
@@ -87,8 +126,13 @@ install_oauth2_proxy() {
     info "::: Finish installation Oauth2-Proxy ..."
 }
 
-# install dex
+# 4. install dex
 install_dex() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
     info "::: Install Dex ..."
     if [ "${DRYRUN}" != 1 ]; then
         kustomize build common/dex/overlays/oauth2-proxy | kubectl apply -f -
@@ -97,33 +141,249 @@ install_dex() {
     info "::: Finish installation Dex ..."
 }
 
-# install knative - WIP
+# 5. install knative - WIP
 install_knative() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
     info "::: Install Knative ..."
     if [ "${DRYRUN}" != 1 ]; then
         kustomize build common/knative/knative-serving/overlays/gateways | kubectl apply -f -
         kustomize build common/istio-1-24/cluster-local-gateway/base | kubectl apply -f -
         # check whether knative is installed or not
-        # need to check the below command
+        # need to check the below conditional
         kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n knative-serving
     fi
     info "::: Finish installation Knative ..."
 }
 
-# Kubeflow Namespace, NetworkPolicy, Roles and Istio Resources - WIP
+# 6. Kubeflow Namespace, NetworkPolicy, Roles and Istio Resources - WIP
 install_kubeflow_resources() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
     info "::: Install Kubeflow namespace, network policy, roles and Istio resources..."
     if [ "${DRYRUN}" != 1 ]; then
         kustomize build common/kubeflow-namespace/base | kubectl apply -f -
         kustomize build common/networkpolicies/base | kubectl apply -f -
         kustomize build common/kubeflow-roles/base | kubectl apply -f -
         kustomize build common/istio-1-24/kubeflow-istio-resources/base | kubectl apply -f -
-        # need to check the below command
+        # need to check the below conditional
         kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
     fi
     info "::: Finish installation Kubeflow ..."
 }
 
+# 7. install kubeflow pipeline - WIP
+install_kubeflow_pipeline() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Kubeflow pipeline ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/pipeline/upstream/env/cert-manager/platform-agnostic-multi-user | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Kubeflow pipeline ..."
+}
+
+# 8. install kserve and model-web-app - WIP
+install_kserve() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install KServe and model-web-app ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/kserve/kserve | kubectl apply --server-side --force-conflicts -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kserve-system
+
+        # install model-web-app
+        kustomize build apps/kserve/models-web-app/overlays/kubeflow | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation KServe and model-web-app ..."
+}
+
+# 9. install katib - WIP
+install_katib() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Katib ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/katib/upstream/installs/katib-with-kubeflow | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Katib ..."
+}
+
+# 10. install central dashboard and admission webhook - WIP
+install_central_dashboard() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Central Dashboard and admission webhook ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/centraldashboard/overlays/oauth2-proxy | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+        # install admission webhook
+        kustomize build apps/admission-webhook/upstream/overlays/cert-manager | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Central Dashboard and admission webhook ..."
+}
+
+# 11. install notebook controller and jupyter web app - WIP
+install_notebook() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Notebook controller and Jupyter web app ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/jupyter/notebook-controller/upstream/overlays/kubeflow | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+        # install jupyter web app
+        kustomize build apps/jupyter/jupyter-web-app/upstream/overlays/istio | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Notebook controller and Jupyter web app ..."
+}
+
+# 12. install pvc viewer controller - WIP
+install_pvc_viewer() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install PVC Viewer Controller ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/pvcviewer-controller/upstream/base | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation PVC Viewer Controller ..."
+}
+
+# 13. Profiles and KFAM - WIP
+install_profiles() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Profiles and KFAM ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/profiles/upstream/overlays/kubeflow | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Profiles and KFAM ..."
+}
+
+# 14. Volume Web App - WIP
+install_volume_webapp() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Volume Web App ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/volumes-web-app/upstream/overlays/istio | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Volume Web App ..."
+}
+
+# 15. Tensorboard webapp and controller - WIP
+install_tensorboard() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Tensorboard webapp and controller ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/tensorboard/tensorboards-web-app/upstream/overlays/istio | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+        # install tensorboard controller
+        kustomize build apps/tensorboard/tensorboard-controller/upstream/overlays/kubeflow | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Tensorboard webapp and controller ..."
+}
+
+# 16. Training operator - WIP
+install_training_operator() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install Training operator ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/training-operator/upstream/overlays/kubeflow | kubectl apply --server-side --force-conflicts -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation Training operator ..."
+}
+
+# 17. user namespace and config port forwarding - WIP
+install_user_namespace() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Install user namespace and config port forwarding ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kustomize build apps/user-namespace/upstream/overlays/kubeflow | kubectl apply -f -
+        # need to check the below conditional
+        kubectl wait --for=condition=Ready pods --all --timeout ${TIMEOUT1} -n kubeflow
+    fi
+    info "::: Finish installation user namespace and config port forwarding ..."
+}
+# config port forwarding
+config_port_forwarding() {
+    # check user input
+    if [ ${KFMODE} == "step" ]; then
+        keepgoing ${FUNCNAME[0]}
+    fi
+
+    info "::: Config port forwarding ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        kubectl port-forward -n istio-system svc/istio-ingressgateway 8080:80
+        # kubectl port-forward -n kubeflow svc/istio-ingressgateway 8443:443
+    fi
+    info "::: Finish config port forwarding ..."
+}
 
 # tools
 # install gum
@@ -178,7 +438,7 @@ show_title() {
         'Kubeflow INIT' "${TITLE_MESSAGE}"
 }
 
-# Check all commands requiring
+# Check all requiring tools
 check_requiring_tools() {
     if (which kubectl) && (which helm) && (which argocd) && (which mkcert) && (which k9s); then
         info "::: kubectl, helm, argocd and mkcert - All requiring tools are exist."

@@ -63,7 +63,7 @@ install_kubeflow_resources
 # 7. Kubeflow pipeline
 install_kubeflow_pipeline
 
-# 8. KServeand model-web-app
+# 8. KServe and model-web-app
 install_kserve
 
 # 9. Katib
@@ -77,20 +77,21 @@ install_notebook
 
 # 12. PVC Viewer Controller
 install_pvc_viewer
+
 # 13. Profiles and KFAM
 install_profiles
+
 # 14. Volume Web App
 install_volume_webapp
+
 # 15. Tensorboard webapp and controller
 install_tensorboard
 
 # 16. Traning operator
 install_training_operator
 
-# 17. user namespace
+# 17. user namespace and config port forwarding
 install_user_namespace
-
-# 18. Port Forwarding to Central Dashboard
 config_port_forwarding
 
 # Check the service is running
