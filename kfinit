@@ -33,29 +33,65 @@ if [ -z "${KF_VERSION}" ]; then
 fi
 
 # install GUM
-install_gum
+# install_gum
 
 # show title along with the current mode
-show_title ${PROJECT_NAME}
+# show_title ${PROJECT_NAME}
 
 # Install Kubeflow components in order
 # 0. clone git and working directory
-info clone_git_repo
-info 'cd ${WORK_DIR}'
+clone_git ${KF_VERSION}
 
 # 1. cert-manager
-info install_cert_manager
+install_cert_manager
 
 # 2. istio
-info install_istio
+install_istio
 
 # 3. Oauth2-proxy
-info install_oauth2_proxy
+install_oauth2_proxy
 
 # 4. dex
-info install_dex
+install_dex
 
+# 5. knative
+install_knative
 
+# 6. namespace, network policy, roles and istio
+install_kubeflow_resources
+
+# 7. Kubeflow pipeline
+install_kubeflow_pipeline
+
+# 8. KServeand model-web-app
+install_kserve
+
+# 9. Katib
+install_katib
+
+# 10. Central Dashboard and admission webhook
+install_central_dashboard
+
+# 11. notebook controller and Jupyter web app
+install_notebook
+
+# 12. PVC Viewer Controller
+install_pvc_viewer
+# 13. Profiles and KFAM
+install_profiles
+# 14. Volume Web App
+install_volume_webapp
+# 15. Tensorboard webapp and controller
+install_tensorboard
+
+# 16. Traning operator
+install_training_operator
+
+# 17. user namespace
+install_user_namespace
+
+# 18. Port Forwarding to Central Dashboard
+config_port_forwarding
 
 # Check the service is running
 if [ "${DRYRUN}" != 1 ]; then

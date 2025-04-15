@@ -25,6 +25,9 @@ KF_USAGE="""
 """
 FUNCTIONS=https://raw.githubusercontent.com/glayneon/kfinit/main/functions
 KF_VER_URL=https://raw.githubusercontent.com/glayneon/kfinit/main/kf_version
+KF_GIT_URL=https://github.com/kubeflow/manifests
 OS_GUM_VER=0.15.2
-PROJECT_NAME=kubeops
+PROJECT_NAME=Kubeflow
 DELAY=2
+TIMEOUT1=180s
+TIMEOUT2=300s
