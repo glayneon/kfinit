@@ -1,0 +1,548 @@
+# double line
+double_line() {
+    echo;echo
+}
+
+# info logs the given argument at info log level.
+info() {
+    echo "[INFO] " "$@"
+}
+
+# warn logs the given argument at warn log level.
+warn() {
+    echo "[WARN] " "$@" >&2
+}
+
+# fatal logs the given argument at fatal log level.
+error() {
+    echo "[ERR] " "$@" >&2
+}
+
+# show usage of this tool
+usage() {
+    echo "${KF_USAGE}"
+}
+
+# install gum
+install_gum() {
+    if ! $(which gum &> /dev/null); then
+        info "::: Install GUM ..."
+        if [ "${DRYRUN}" != 1 ]; then
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+            echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | tee /etc/apt/sources.list.d/charm.list
+            apt update && apt install gum=${OS_GUM_VER}
+        fi
+        info "::: Finish installation GUM ..."
+    else
+        info "::: GUM is already installed ..."
+    fi
+}
+
+# install helm
+install_helm() {
+    info "::: Install Helm ..."
+    if [ "${DRYRUN}" != 1 ]; then
+        curl ${HELM_INSTALL} | DESIRED_VERSION=${OS_HELM_VER} bash
+        helm completion bash > /etc/bash_completion.d/helm
+    fi
+    info "::: Finish installation Helm ..."
+}
+
+# install yjq
+install_yjq() {
+    if ! $(which yq &> /dev/null); then
+        info "::: Install yq ..."
+        wget ${YQ_URL} -O /usr/bin/yq && chmod +x /usr/bin/yq
+    fi
+
+    if ! $(which jq &> /dev/null); then
+        info "::: Install jq ..."
+        apt install -y jq=${OS_JQ_VER}
+    fi
+}
+
+# check RKE2 CONFIG DIR and File
+check_config_dir() {
+    if [ ! -d $(dirname "${RKE2_CONFIG_YAML}") ]; then
+        mkdir -p $(dirname "${RKE2_CONFIG_YAML}")
+        touch "${RKE2_CONFIG_YAML}"
+    fi
+
+}
+
+# RKE2 server config
+cluster_config() {
+    set +e
+    gum spin --spinner dot --title "::: Start Configuring First Master :::" -- sleep ${RUNDELAY}
+    check_config_dir
+    RKE2_TOKEN=$(cat /proc/sys/kernel/random/uuid)
+    IS_LOOPING=0
+    while [ ${IS_LOOPING} -eq 0 ]; do
+        double_line
+        L4_IP=$(gum input --header="::: Enter LoadBalancer IP Address - " --value=${GUM_CASE_L4_IP})
+        NODE1_IP=$(gum input --header="::: Enter This Node IP Address - " --value=${GUM_CASE_NODE_IP})
+        NODE2_IP=$(gum input --header="::: Enter 2nd Node IP Address - " --value=${GUM_CASE_NODE_IP})
+        NODE3_IP=$(gum input --header="::: Enter 3rd Node IP Address - " --value=${GUM_CASE_NODE_IP})
+        
+        double_line
+        gum write --header='Check the below and Enter' --height=15 <<EOF > ${RKE2_CONFIG_YAML}
+token: ${RKE2_TOKEN}
+tls-san:
+- ${L4_IP}
+- ${NODE1_IP}
+- ${NODE2_IP}
+- ${NODE3_IP}
+write-kubeconfig-mode: "0600"
+etcd-expose-metrics: ${RKE2_ETCD_EXPOSE}
+cni:
+  - ${RKE2_CNI}
+EOF
+        if $(gum confirm "Is Everything Correct ?"); then
+            double_line
+            info "::: ${RKE2_CONFIG_YAML} file is saved ..."
+            IS_LOOPING=1
+        else
+            info "::: Generating config.yaml Again ..."
+            continue
+        fi
+    done
+
+    # Generating config.yaml for Master nodes
+    double_line
+    info "::: Generating ${RKE2_CONFIG_YAML_4SERVER} for Masters ... "
+    # conditional for RKE2_CONFIG_DIR
+    if [ ! -d "${RKE2_CONFIG_DIR}" ]; then
+        mkdir ${RKE2_CONFIG_DIR}
+    fi
+    cat <<EOF > ${RKE2_CONFIG_YAML_4SERVER}
+server: https://${L4_IP}:9345
+token: ${RKE2_TOKEN}
+tls-san:
+- ${L4_IP}
+- ${NODE1_IP}
+- ${NODE2_IP}
+- ${NODE3_IP}
+write-kubeconfig-mode: "0600"
+etcd-expose-metrics: ${RKE2_ETCD_EXPOSE}
+cni:
+  - ${RKE2_CNI}
+EOF
+    double_line
+    info "::: Generating ${RKE2_CONFIG_YAML_4AGENT} for Workers ... "
+    cat <<EOF > ${RKE2_CONFIG_YAML_4AGENT}
+server: https://${L4_IP}:9345
+token: ${RKE2_TOKEN}
+write-kubeconfig-mode: "0600"
+cni:
+  - ${RKE2_CNI}
+EOF
+}
+
+# RKE2 agent config
+agent_config() {
+    # set +e
+    INSTALL_TYPE=$1
+    IS_LOOPING=0
+    check_config_dir # check config.yaml folder
+
+    gum spin --spinner dot --title "::: Config ${INSTALL_TYPE} Node ... " -- sleep ${RUNDELAY}
+    if [ "${INSTALL_TYPE}" = 'master' ]; then
+        TARGET_CONFIG="${RKE2_CONFIG_YAML_4SERVER}"
+    elif [ "${INSTALL_TYPE}" = 'worker' ]; then
+        TARGET_CONFIG="${RKE2_CONFIG_YAML_4AGENT}"
+    fi
+    
+    # loading server config.yaml file
+    while [ ${IS_LOOPING} -eq 0 ]; do
+        RKE2_NODE_SSH=$(gum input --header="::: Enter Master Node IP to fetch config file - " --value=${GUM_CASE_NODE_IP})
+        NODE_PASSWD=$(gum input --header="::: Enter ${RKE2_ADMIN} Account Password - " --password --value='pas' --char-limit=40)
+        if [ ! -z "${RKE2_NODE_SSH}" ] && [ ! -z "${NODE_PASSWD}" ]; then
+            double_line
+            info "::: Try fetching ${INSTALL_TYPE} config.yaml from Master ${RKE2_NODE_SSH} ..."
+            sshpass -p "${NODE_PASSWD}" scp -o StrictHostKeyChecking=no -r ${RKE2_ADMIN}@${RKE2_NODE_SSH}:${RKE2_CONFIG_DIR} ${RKE2_CONFIG_DIR}
+            if [ "$?" = 0 ]; then
+                info "::: Successfully fetching config.yaml from Remote..."
+                # cp ${RKE2_CONFIG_DIR}/*.pem ${OS_CERT_DIR} && update-ca-certificates
+                sleep ${RUNDELAY}
+                gum write --header "Check Fetched config.yaml, And Enter ..." < ${TARGET_CONFIG} > ${RKE2_CONFIG_YAML}
+                info "::: Successfully Populate config.yaml file ..."
+                IS_LOOPING=1
+            else
+                double_line
+                error "::: Failed to fetch Agent config.yaml from Master..."
+                sleep ${RUNDELAY}
+            fi
+        else
+            error "::: There's no infomation you entered. ..."
+            error "::: Generating config.yaml Again ..."
+        fi
+    done
+}
+
+# Show title
+show_title() {
+    if [ "${DRYRUN}" = 1 ]; then
+        TITLE_MESSAGE="Running Dry-run mode ..."
+    else
+        TITLE_MESSAGE="Initialize Installation of ${1} ..."
+    fi
+    gum style \
+        --foreground 212 --border-foreground 212 --border double \
+        --align center --width 50 --margin "1 2" --padding "2 4" \
+        'KubeOps INIT' "${TITLE_MESSAGE}"
+}
+
+# Check RKE2 Configurations
+config_rke2_install() {
+    info "::: Start Setting RKE2 Configuration!!! :::"
+    sleep ${RUNDELAY}
+    double_line
+    RKE2_VERSION=$(curl $RKE2_VERSIONS | gum choose --header="::: Choose RKE2 Version - ")
+    # RKE2_VERSION=$(gum choose --header="::: Choose RKE2 Version - " ${RKE2_VERSIONS})
+    info "::: RKE2_VERSION - ${RKE2_VERSION}"
+
+    RKE2_TYPE=$(gum choose --header="::: Choose RKE2 Type - " ${RKE2_ALL_TYPES})
+    info "::: RKE2_TYPE - ${RKE2_TYPE}"
+
+    RKE2_ADMIN=$(gum input --value='kubeops' --header='::: RKE2 Admin Account - ')
+    info "::: RKE2_ADMIN - ${RKE2_ADMIN}"
+
+    double_line
+    echo -e "# RKE2 Installation Config\n- RKE2_VERSION : ${RKE2_VERSION}\n- RKE2_TYPE : ${RKE2_TYPE}\n- RKE2_ADMIN : ${RKE2_ADMIN}  " | gum format
+
+    if $(gum confirm); then
+        info "::: Proceeding Install Process RKE2 ..."
+    else
+        info "::: Cancel Installation RKE2 ..."
+        exit -1
+    fi
+
+    double_line
+    info "::: Install RKE2 with ${RKE2_VERSION} and ${RKE2_TYPE} mode ..."
+    sleep ${RUNDELAY}
+}
+
+# Install rke2 along with the given configurations
+install_rke2() {
+    if [ "${DRYRUN}" = 1 ]; then
+        echo "curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION=${RKE2_VERSION} INSTSLL_RKE2_TYPE=${RKE2_TYPE} sh -"
+        info "::: Enabling RKE2-Server service ..."
+    else
+        curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION=${RKE2_VERSION} INSTSLL_RKE2_TYPE=${RKE2_TYPE} sh -
+        double_line
+        info "::: Enabling RKE2 ${RKE2_TYPE} service ..."
+        sleep ${RUNDELAY}
+        systemctl enable rke2-${RKE2_TYPE}.service
+    fi
+}
+
+# Check all commands requiring
+check_requiring_tools() {
+    if (which kubectl) && (which helm) && (which argocd) && (which mkcert) && (which k9s); then
+        info "::: kubectl, helm, argocd and mkcert - All requiring tools are exist."
+        info "::: It's Ready to Initiate ${PRIME_NAME}"
+    else
+        error "::: All requiring tools are Not Exist..."
+        error "::: Please Check these tools out - kubectl, helm, argocd and mkcert ..."
+    fi
+}
+
+
+# copy Cert to another namespace
+copy_cert() {
+    if [ ! -z ${1} ]; then
+        TARGET_NS=$1
+        k get secret -l cert=${RKE2_CERT_NAME} -n kube-system -ojson | jq 'del(.items[0].metadata["namespace","creationTimestamp","resourceVersion","selfLink","uid"])' | kubectl apply -n ${TARGET_NS} -f -
+    else
+        echo -e "Usage: copy_cert [namespace]\n"
+    fi
+}
+
+
+# Function to determine OS type and CPU architecture
+get_os_and_arch() {
+    # Step 1: Detect the Operating System type
+    info "::: Detecting operating system type..."
+    OS_TYPE=$(uname -s)
+
+    case "$OS_TYPE" in
+        Darwin)
+            OS_TYPE="darwin"
+            ;;
+        Linux)
+            OS_TYPE="linux"
+            ;;
+        *)
+            warn "::: Unsupported Operating System: $OS_TYPE"
+            return 1
+            ;;
+    esac
+    info "::: Operating System detected: $OS_TYPE"
+
+    # Step 2: Detect the CPU architecture
+    info "::: Detecting CPU architecture..."
+    ARCH_TYPE=$(uname -m)
+
+    case "$ARCH_TYPE" in
+        x86_64)
+            ARCH_TYPE="amd64"
+            ;;
+        arm64|aarch64)
+            ARCH_TYPE="arm64"
+            ;;
+        *)
+            warn "::: Unsupported CPU architecture: $ARCH_TYPE"
+            return 1
+            ;;
+    esac
+    info "::: CPU Architecture detected: $ARCH_TYPE"
+
+    # Return values
+    OS_AND_ARCH="${OS_TYPE}-${ARCH_TYPE}"
+}
+
+
+# Install argocd-CLI
+install_tools_cli() {
+    get_os_and_arch
+    # install argocd-cli
+    ARGOCD_CLI=${RKE2_ARGOCLI_URL}/argocd-${OS_AND_ARCH}
+    curl -sSL -O ${ARGOCD_CLI} # leave filename
+    sudo mv ${ARGOCD_CLI##*/} /usr/local/bin/argocd && chmod +x /usr/local/bin/argocd
+
+    # install mkcert
+    MKCERT_CLI=${RKE2_MKCERT_URL}/mkcert-${RKE2_MKCERT_VER}-${OS_AND_ARCH}
+    curl -sSL -O ${MKCERT_CLI} # leave filename
+    sudo mv ${MKCERT_CLI##*/} /usr/local/bin/mkcert && chmod +x /usr/local/bin/mkcert
+
+    # install k9s
+    K9S_CLI=${RKE2_K9S_URL}/k9s_${OS_TYPE}_${ARCH_TYPE}.deb
+    info "::: Download ${K9S_CLI} ..."
+    curl -sSL -O ${K9S_CLI} && dpkg -i ./k9s_${OS_TYPE}_${ARCH_TYPE}.deb && rm -f ./k9s_${OS_TYPE}_${ARCH_TYPE}.deb
+
+    check_requiring_tools
+}
+
+
+# get cert domain
+# get ingress domain
+get_domain() {
+    CERT_DIR=$(ls -d *_cert)
+    if [ ! -z ${ING_DOMAIN} ]; then
+        ING_DOMAIN=${CERT_DIR%_cert}
+    fi
+
+    echo ${ING_DOMAIN}
+}
+
+# create ingress
+create_ingress() {
+    RELEASE=$1
+    INGRESS_ANN=$2
+    SVC_NAME=$3
+    TARGET_NS=$4
+    INGRESS_DOMAIN=$5
+    TARGET_PORT=$6
+    kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${RELEASE}-ingress
+  namespace: ${TARGET_NS}
+  annotations:
+    cert-manager.io/cluster-issuer: "${PRIME_CERT_ISSUER}"
+    nginx.ingress.kubernetes.io/${INGRESS_ANN}
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  tls:
+  - hosts:
+    - ${INGRESS_DOMAIN}
+    secretName: $RELEASE-tls
+  ingressClassName: nginx
+  rules:
+  - host: ${INGRESS_DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ${SVC_NAME}
+            port:
+              number: ${TARGET_PORT}
+EOF
+}
+
+# get service domain
+get_domain() {
+    if $(gum confirm "Do you want to Set up the Self-Signed service domain? OR Else ${PRIME_DOMAIN} is used as a Default. "); then
+        IS_LOOPING=0
+        while [ ${IS_LOOPING} -eq 0 ]; do
+            SVC_DOMAIN=$(gum input --header="::: Enter Service-Domain - " --value="aaaaa.com" --char-limit=100)
+            if $(gum confirm "It will be used as Ingress Domain,, Confirm... "); then
+                info "::: all Ingress domains are creating under ${SVC_DOMAIN}..."
+                IS_LOOPING=1
+            else
+                gum confirm "Want to quit? Then It should be used by the Default domain ${PRIME_DOMAIN}" && IS_LOOPING=1
+                SVC_DOMAIN=${PRIME_DOMAIN}
+                info "::: all Ingress domains are creating under ${SVC_DOMAIN}..."
+            fi
+        done
+    else
+        SVC_DOMAIN=${PRIME_DOMAIN}
+        info "::: all Ingress domains are creating under ${SVC_DOMAIN}..."
+    fi
+}
+
+# Initiate CSI and CD
+install_init_tools() {
+    check_requiring_tools
+    
+    helm repo add ${PRIME_NAME} ${PRIME_HELM_REPO} --force-update
+
+    # install cert-manager
+    info "::: Install ${PRIME_CERTMNG}..."
+    helm install ${PRIME_CERTMNG} ${PRIME_NAME}/${PRIME_CERTMNG} \
+     -n ${PRIME_CERTMNG} \
+     --create-namespace \
+     --version ${PRIME_CERTMNG_VER} \
+     --set crds.enabled=true
+
+    # import mkcert-ca-root
+    kubectl create secret tls ${PRIME_CERT_SECRET} --key "$(mkcert -CAROOT)"/rootCA-key.pem \
+    --cert "$(mkcert -CAROOT)"/rootCA.pem -n ${PRIME_CERTMNG}
+
+    # check cert-manager
+    kubectl wait -n ${PRIME_CERTMNG} --for=condition=Available --timeout=300s \
+    deployment/${PRIME_CERTMNG}
+    kubectl wait -n ${PRIME_CERTMNG} --for=condition=Available --timeout=300s \
+    deployment/${PRIME_CERTMNG}-webhook
+
+    # Create ClusterIssuer
+    kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ${PRIME_CERT_ISSUER}
+  namespace: cert-manager
+spec:
+  ca:
+    secretName: ${PRIME_CERT_SECRET}
+EOF
+
+    # check clusterIssuer
+    kubectl wait --for=condition=Ready=true --timeout=30s \
+    clusterissuer.cert-manager.io/${PRIME_CERT_ISSUER} -n ${PRIME_CERTMNG}
+
+    # get service domain
+    get_domain
+    
+    # install longhorn
+    info "::: Install ${PRIME_CSI} ..."
+    helm install ${PRIME_CSI} ${PRIME_NAME}/${PRIME_CSI} \
+     -n ${PRIME_CSI}-system \
+     --create-namespace \
+     --version ${PRIME_CSI_VER} \
+     --set defaultSettings.defaultDataPath="/${PRIME_CSI}"
+    
+    kubectl -n ${PRIME_CSI}-system wait --for=condition=ready pod --all \
+    --timeout=${PRIME_CHECK_PERIOD}
+    info "::: Installation of ${PRIME_CSI} is finished..."
+
+    ##### Add ingress for CSI-UI Here!!!
+    create_ingress ${PRIME_CSI} 'force-ssl-redirect: "true"' ${PRIME_CSI}-frontend ${PRIME_CSI}-system ${PRIME_CSI}.${SVC_DOMAIN} 80
+
+    info "::: Install ${PRIME_CD} ..."
+    helm install ${PRIME_CD_NS} ${PRIME_NAME}/${PRIME_CD} \
+     -n ${PRIME_CD_NS} \
+     --create-namespace \
+     --version ${PRIME_CD_VER}
+
+    # Check components
+    kubectl -n ${PRIME_CD_NS} wait --for=condition=ready pod \
+    -l app.kubernetes.io/name=argocd-server --timeout=${PRIME_CHECK_PERIOD}
+    info "::: Installation of ${PRIME_CD_NS} is finished..."
+
+    ##### Add Ingress for ArgoCD Here!!!
+    create_ingress ${PRIME_CD_NS} 'backend-protocol: "HTTPS"' ${PRIME_CD_NS}-server ${PRIME_CD_NS} ${PRIME_CD_NS}.${SVC_DOMAIN} 443
+}
+
+# Initiate CD setup
+initiate_cd() {
+    THIS_IP=$(hostname -I | cut -d ' ' -f 1)
+    info "::: Associate Nodeport ${PRIME_CD_PORT} to ${PRIME_CD_NS} Service ..."
+    kubectl patch svc argocd-server -n ${PRIME_CD_NS} \
+    -p '{"spec": {"type": "NodePort", "ports": [{"port":443, "nodePort":30010}]}}'
+    CDURL="${THIS_IP}:${PRIME_CD_PORT}"
+    INITPW=$(kubectl -n ${PRIME_CD_NS} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+
+    if [ -z "${INITPW}" ]; then
+        error "::: Failed to retrieve the initial password. Please Check your setup."
+        exit 1
+    else
+        info ":::Initial admin password retrieved."
+        gum spin --spinner line --title ":::Try login as admin ..." -- sleep ${RUNDELAY}
+        argocd login ${CDURL} --username admin --password ${INITPW} --insecure
+    fi
+
+    NEWPW=$(gum input --header="::: Enter New Password for ${PRIME_CD_NS} Admin - " --password --value='pas' --char-limit=40)
+    if [ ! -z "${NEWPW}" ]; then
+        info "::: Update Admin Password in ${PRIME_CD_NS} ..."
+        argocd account update-password --current-password ${INITPW} --new-password ${NEWPW}
+
+        info "::: Add Repo Credential."
+
+        IS_LOOPING=0
+        while [ ${IS_LOOPING} -eq 0 ]; do
+            REPOCRED=$(gum input --header="::: Enter Access Token for ${PRIME_REPO} - " --value=${PRIME_TOKEN} --char-limit=100)
+            if $(gum confirm "Everything Correct ?"); then
+                argocd repocreds add ${PRIME_REPO} --password ${REPOCRED}
+                argocd repocreds add ${PRIME_PRIV_CHART} --username ${REPOCRED} --password ${REPOCRED} --type helm
+                sleep ${RUNDELAY}
+                kubectl apply -f ${PRIME_ARGO_SETUP}
+                double_line
+                info "::: Added Repo-Creds for ${PRIME_REPO} ..."
+                IS_LOOPING=1
+            else
+                info "::: Generating config.yaml Again ..."
+                continue
+            fi
+        done
+        info "::: Setting Up - Argocd  completed..."
+        kubectl patch svc argocd-server -n  ${PRIME_CD_NS} \
+        -p '{"spec": {"type": "ClusterIP", "ports": [{"port": 443, "targetPort": 8080, "nodePort": null}]}}'
+        info "::: Access $CDURL ..."
+    fi
+}
+
+
+# cert action: generatig self-signed cert.
+gen_cert() {
+    if [ $EXPORT_CERT -eq 0 ]; then
+        if [ ! -e /home/${RKE2_ADMIN}/.local/share/mkcert/rootCA.pem ] && \
+        [ ! -e /home/${RKE2_ADMIN}/.local/share/mkcert/rootCA-key.pem ]; then
+            mkcert -install && info "::: Generating Self-Signed Root-CA for OS and K8s!!"
+            mkdir -p /home/${RKE2_ADMIN}/.local/share/mkcert
+            cp "$(mkcert -CAROOT)"/* /home/${RKE2_ADMIN}/.local/share/mkcert
+            chown -R ${RKE2_ADMIN}:${RKE2_ADMIN} /home/${RKE2_ADMIN}/.local
+        else
+            info "::: Importing Self-Signed Root-CA for OS and K8s!!"
+            CAROOT="/home/${RKE2_ADMIN}/.local/share/mkcert" mkcert -install
+        fi
+    elif [ $EXPORT_CERT -eq 1 ]; then
+        info "::: Export ${PRIME_CERT_SECRET} from ${PRIME_CERTMNG} ..."
+        KUBECTL="kubectl --kubeconfig=/home/${RKE2_ADMIN}/.kube/config"
+        KUBECTL_CHECK="${KUBECTL} wait --for=condition=Ready=true --timeout=10s clusterissuer.cert-manager.io/${PRIME_CERT_ISSUER}" 
+
+        if $KUBECTL_CHECK; then
+            $KUBECTL get secret ${PRIME_CERT_SECRET} -n ${PRIME_CERTMNG} \
+            -o jsonpath="{.data['tls\.crt']}" | base64 -d > rootCA.pem
+            CAROOT=. mkcert -install && rm rootCA.pem
+            info "::: Done..."
+        else
+            error "::: Check ${PRIME_CERT_SECRET} and ${PRIME_CERT_ISSUER}.."
+            sleep ${RUNDELAY}
+        fi
+    fi
+}

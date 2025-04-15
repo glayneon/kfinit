@@ -1,0 +1,29 @@
+KF_USAGE="""
+    This is CURLED Script to Install Kubeflow along with Ecosystem provided by https://github.com/kubeflow/manifests
+
+    This script will install the following components:
+        - CertManager
+        - Istio
+        - Oauth2-proxy
+        - Dex
+        - Knative
+        - KServe
+        - Katib
+        - Pipelines
+
+        
+    ENV_VAR:
+        - KF_VERSION
+            Install Kubeflow with this version.
+            * value is [ v1.10.0 | v1.9.1 ]
+
+
+    Usage: 
+            curl <this script URL> | KF_VERSION=vX.X.X bash
+
+
+"""
+FUNCTIONS=https://raw.githubusercontent.com/glayneon/kfinit/main/functions
+KF_VER_URL=https://raw.githubusercontent.com/glayneon/kfinit/main/kf_version
+OS_GUM_VER=0.15.2
+PROJECT_NAME=kubeops

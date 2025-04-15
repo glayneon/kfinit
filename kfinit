@@ -1,0 +1,85 @@
+#!/bin/bash
+
+set -eux -o pipefail
+
+# conditional for DEBUG mode
+if [ "${DEBUG}" = 1 ]; then
+    set -x
+elif [ "${DRYRUN}" = 1 ]; then
+    RUNTEST=1
+fi
+
+# variables
+KFENV=https://raw.githubusercontent.com/glayneon/kfinit/main/kfenv
+
+# loading environtal variables using curl
+curlsource() {
+    LOADING_FILE=$(basename $1)
+    echo "[INFO] ::: Loading Environtal Variables from ${LOADING_FILE} ..."
+    f=$(mktemp -t curlsource.XXX)
+    curl -o "$f" -sSL "$1"
+    source "$f"
+    rm -f "$f"
+}
+
+# import all required variables for installation
+curlsource ${KFENV}
+curlsource ${FUNCTIONS}
+
+# Installation Flag: true or false
+if [ -z "${KF_VERSION}" ]; then
+    usage
+    exit 1
+fi
+
+# install GUM
+install_gum
+
+# show title along with the current mode
+show_title ${PROJECT_NAME}
+
+# Install Kubeflow components in order
+# 0. clone git and working directory
+clone_git_repo
+cd ${WORK_DIR}
+
+# 1. cert-manager
+install_cert_manager
+
+# 2. istio
+install_istio
+
+# 3. Oauth2-proxy
+install_oauth2_proxy
+
+# 4. dex
+install_dex
+
+
+
+# Check the service is running
+if [ "${DRYRUN}" != 1 ]; then
+    info "::: Start - Running RKE2 ${RKE2_TYPE} service for about 90 seconds ..."
+    gum spin --spinner line --title "::: Running RKE2 ${RKE2_TYPE} service... " -- systemctl start rke2-${RKE2_TYPE}.service
+    # journalctl -u rke2-server -f
+
+    double_line
+    info "::: Finish - Running RKE2 ${RKE2_TYPE} service ... "
+    sleep ${RUNDELAY}
+fi
+
+
+
+# install cert-manager, argocd-cli and longhorn
+# install_tools_cli
+
+# generate self-signed cert
+# gen_cert
+
+if [ "${DRYRUN}" != 1 ]; then
+    # Ending
+    double_line
+    info "::: Finish installation of Kubeflow with ${KF_VERSION}..."
+    info "::: ..."
+    info "::: ..."
+fi
