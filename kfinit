@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex -o pipefail
+set -e -o pipefail
 
 # conditional for DEBUG mode
 if [ "${DEBUG}" = 1 ]; then
@@ -40,35 +40,34 @@ show_title ${PROJECT_NAME}
 
 # Install Kubeflow components in order
 # 0. clone git and working directory
-clone_git_repo
-cd ${WORK_DIR}
+info clone_git_repo
+info 'cd ${WORK_DIR}'
 
 # 1. cert-manager
-install_cert_manager
+info install_cert_manager
 
 # 2. istio
-install_istio
+info install_istio
 
 # 3. Oauth2-proxy
-install_oauth2_proxy
+info install_oauth2_proxy
 
 # 4. dex
-install_dex
+info install_dex
 
 
 
 # Check the service is running
 if [ "${DRYRUN}" != 1 ]; then
-    info "::: Start - Running RKE2 ${RKE2_TYPE} service for about 90 seconds ..."
-    gum spin --spinner line --title "::: Running RKE2 ${RKE2_TYPE} service... " -- systemctl start rke2-${RKE2_TYPE}.service
+    info "::: Start - Running Kubeflow service for about 90 seconds ..."
+    # gum spin --spinner line --title "::: Running Kubeflow service... " -- systemctl start rke2-${RKE2_TYPE}.service
+    gum spin --spinner line --title "::: Running Kubeflow service... " sleep 10
     # journalctl -u rke2-server -f
 
     double_line
-    info "::: Finish - Running RKE2 ${RKE2_TYPE} service ... "
-    sleep ${RUNDELAY}
+    info "::: Finish - Running Kubeflow service ... "
+    sleep ${DELAY}
 fi
-
-
 
 # install cert-manager, argocd-cli and longhorn
 # install_tools_cli
